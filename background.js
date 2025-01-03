@@ -1,7 +1,3 @@
-/// API-KEY
-importScripts('secrets.js');
-console.log('API Key loaded:', API_SECRETS.GROQ_API_KEY); 
-
 //Configuration
 const CONFIG = {
   API_ENDPOINT: 'https://api.groq.com/openai/v1/chat/completions',
@@ -148,9 +144,11 @@ class ApiService {
         return this.validateEventData(eventInfo);
 
     } catch (error) {
-        console.error('응답 처리 중 에러:', error);
-        throw error;
+      console.error('응답 처리 중 에러:', error);
+      throw new Error(`일정 정보 추출 실패: ${error.message}`);
     }
+
+    
   }
 
   static validateEventData(eventInfo) {
@@ -281,8 +279,43 @@ class MessageHandler {
         } finally {
           state.processingStatus = false;
         }
-        break;
-        
+
+          break;
+        case 'capture':
+          try {
+              const imageData = await ScreenshotService.captureVisibleTab(request.area);
+              // 캡처된 이미지를 storage에 저장하고 응답으로도 전송
+              await chrome.storage.local.set({ 'capturedImage': imageData });
+              await chrome.action.openPopup();
+
+              sendResponse({ 
+                  success: true, 
+                  imageData: imageData 
+              });
+              
+          } catch (error) {
+              console.error('Screenshot capture error:', error);
+              sendResponse({ 
+                  success: false, 
+                  error: error.message 
+              });
+          }
+          break;
+        case 'updateCapturedImage':
+          // content.js에서 보낸 이미지 업데이트 메시지 처리
+          try {
+            if (request.imageData) {
+              await chrome.storage.local.set({ 'capturedImage': request.imageData });
+              // 팝업이 이미 열려있다면 팝업에도 메시지 전달
+              const views = chrome.extension.getViews({ type: 'popup' });
+              for (let view of views) {
+                view.updateCapturedImage(request.imageData);
+              }
+            }
+          } catch (error) {
+            console.error('Update captured image error:', error);
+          }
+          break;
       case 'createCalendarEvent':
         try {
           const eventCreated = await CalendarService.createCalendarEvent(request.eventData);
@@ -304,22 +337,45 @@ class MessageHandler {
           error: 'Unknown action'
         });
     }
+    return true;
   }
 }
 
-// Context Menu Setup
-chrome.contextMenus.create({
-  id: "createEvent",
-  title: "Create Calendar Event",
-  contexts: ["selection"]
+// -----Context Menu Setup ------------------------------
+chrome.runtime.onInstalled.addListener(() => {
+  chrome.contextMenus.create({
+    id: "createEvent",
+    title: "Create Event",
+    contexts: ["selection"]
+  });
+  // 우클릭 스크린샷 메뉴 설정
+  chrome.contextMenus.create({
+    id: "takeScreenshot",
+    title: "Take Screenshot",
+    contexts: ["all"]
+  });
 });
 
-// Event Listeners
-
-//오른쪽 클릭시
-chrome.contextMenus.onClicked.addListener((info, tab) => {
+// -----Event Listeners ---------------------------------
+//오른쪽 클릭시 이벤트 처리
+chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   if (info.menuItemId === "createEvent") {
     state.selectedText = info.selectionText;
+  
+  //팝업창 뜨게 하기
+  await chrome.action.openPopup();
+  }
+  else if (info.menuItemId === "takeScreenshot") {
+    try {
+      await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        files: ['content.js']
+      });
+      // content script에 영역 선택 시작 메시지 전송
+      await chrome.tabs.sendMessage(tab.id, { action: "startSelection" });
+      } catch (error) {
+        console.error('Screenshot initiation error:', error);
+      }
   }
 });
 
@@ -328,3 +384,112 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   MessageHandler.handleMessage(request, sender, sendResponse);
   return true; // Keep message channel open for async response
 });
+
+// // background.js의 takeScreenshot 부분을 수정
+// if (info.menuItemId === "takeScreenshot") {
+//   try {
+//     if (tab?.id && tab.id !== -1) {
+//       const currentTab = await chrome.tabs.get(tab.id);
+      
+//       if (currentTab.status === 'complete') {
+//         try {
+//           // 먼저 content script가 이미 주입되어 있는지 확인하고 주입
+//           await chrome.scripting.executeScript({
+//             target: { tabId: tab.id },
+//             files: ['content.js']
+//           });
+          
+//           // 그 다음 메시지 전송
+//           await chrome.tabs.sendMessage(tab.id, { action: "startSelection" });
+//         } catch (error) {
+//           console.error('Content script 통신 실패:', tab.id, error);
+//         }
+//       } else {
+//         console.log('탭이 아직 로드되지 않았습니다');
+//       }
+//     }
+//   } catch (error) {
+//     console.error('스크린샷 처리 중 에러:', error);
+//   }
+// };
+//----Screenshot Service implementatio ---------------------------
+
+// class ScreenshotService {
+//   static async captureVisibleTab(area) {
+//     //현재 탭의 스크린샷 캡쳐
+//     return new Promise((resolve, reject) => {
+//       try {
+//         chrome.tabs.captureVisibleTab(null, {format: 'png'}, (dataUrl) => {
+//           if (chrome.runtime.lastError) {
+//             reject(new Error(chrome.runtime.lastError.message));
+//             return;
+//           } // 캡처된 이미지를 선택 영역에 맞게 크롭
+//           this.cropImage(dataUrl, area)
+//             .then(resolve)
+//             .catch(reject);
+//         });
+//       } catch (error) {
+//         reject(error);
+//       }
+//     });
+//   }
+
+//   static async cropImage(dataUrl, area) {
+//     return new Promise((resolve, reject) => {
+//       const img = new Image();
+//       img.onload = () => {
+//         try {
+//           const canvas = document.createElement('canvas');
+//           canvas.width = area.width;
+//           canvas.height = area.height;
+          
+//           const ctx = canvas.getContext('2d');
+//           ctx.drawImage(
+//             img,
+//             area.x, area.y,
+//             area.width, area.height,
+//             0, 0,
+//             area.width, area.height
+//           );
+          
+//           resolve(canvas.toDataURL());
+//         } catch (error) {
+//           reject(error);
+//         }
+//       };
+      
+//       img.onerror = () => reject(new Error('이미지 로드 실패'));
+//       img.src = dataUrl;
+//     });
+//   }
+// }
+class ScreenshotService {
+  static async captureVisibleTab(area) {
+    return new Promise((resolve, reject) => {
+      try {
+        chrome.tabs.captureVisibleTab(null, {format: 'png'}, (dataUrl) => {
+          if (chrome.runtime.lastError) {
+            reject(new Error(chrome.runtime.lastError.message));
+            return;
+          }
+          // Get active tab and send to content script for cropping
+          chrome.tabs.query({active: true, currentWindow: true}, function(tabs) {
+            chrome.tabs.sendMessage(tabs[0].id, {
+              action: "cropScreenshot",
+              imageData: dataUrl,
+              area: area
+            }, response => {
+              if (response && response.croppedImage) {
+                resolve(response.croppedImage);
+              } else {
+                reject(new Error('Failed to crop image'));
+              }
+            });
+          });
+        });
+      } catch (error) {
+        reject(error);
+      }
+    });
+  }
+}

@@ -1,53 +1,80 @@
 document.addEventListener('DOMContentLoaded', function() {
-  // DOM 요소들을 미리 참조
-  const resultDiv = document.getElementById('parseResult');
-  const contentDiv = document.getElementById('resultContent');
-  const loadingIndicator = document.getElementById('loadingIndicator');
-  const form = document.getElementById('eventForm');
+    // DOM 요소들을 미리 참조
+    const resultDiv = document.getElementById('parseResult');
+    const contentDiv = document.getElementById('resultContent');
+    const loadingIndicator = document.getElementById('loadingIndicator');
+    const form = document.getElementById('eventForm');
+    const screenshotSection = document.getElementById('screenshotSection');
+    const capturedImage = document.getElementById('capturedImage');
 
-  // 안전한 HTML 이스케이프 함수
-  function escapeHtml(unsafe) {
-      return unsafe
-          ? unsafe.replace(/[&<>"']/g, char => ({
-              '&': '&amp;',
-              '<': '&lt;',
-              '>': '&gt;',
-              '"': '&quot;',
-              "'": '&#039;'
-          })[char])
-          : '';
-  }
 
-  // 로딩 상태 표시 함수
-  function showLoading() {
-      if (resultDiv && loadingIndicator) {
-          resultDiv.classList.remove('is-hidden');
-          loadingIndicator.classList.remove('is-hidden');
-          if (contentDiv) {
-              contentDiv.classList.add('is-hidden');
-          }
-      }
-  }
+    // 안전한 HTML 이스케이프 함수
+    function escapeHtml(unsafe) {
+        return unsafe
+            ? unsafe.replace(/[&<>"']/g, char => ({
+                '&': '&amp;',
+                '<': '&lt;',
+                '>': '&gt;',
+                '"': '&quot;',
+                "'": '&#039;'
+            })[char])
+            : '';
+    }
 
-  // 로딩 상태 숨기기 함수
-  function hideLoading() {
-      if (loadingIndicator) {
-          loadingIndicator.classList.add('is-hidden');
-      }
-      if (contentDiv) {
-          contentDiv.classList.remove('is-hidden');
-      }
-  }
+    //Screenshot Helper
+    chrome.storage.local.get(['capturedImage'], function(result) {
+        if (result.capturedImage) {
+            if (capturedImage) {
+                capturedImage.src = result.capturedImage;
+                capturedImage.style.display = 'block';
+            }
+        }
+    });
 
-  // 결과 표시 함수
-  function displayResult(response) {
-      if (!resultDiv || !contentDiv) {
-          console.error('Required DOM elements not found');
-          return;
-      }
+    function updateCapturedImage(imageData) {
+        if (capturedImage) {
+            capturedImage.src = imageData;
+            capturedImage.style.display = 'block';
+        }
+    }
 
-      resultDiv.classList.remove('is-hidden');
-      hideLoading();
+    // 이미지 표시 함수
+    chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+        if (request.action === "updateCapturedImage" && request.imageData) {
+            updateCapturedImage(request.imageData);
+        }
+    });
+
+    // 로딩 상태 표시 함수
+    function showLoading() {
+        if (resultDiv && loadingIndicator) {
+            resultDiv.classList.remove('is-hidden');
+            loadingIndicator.classList.remove('is-hidden');
+            if (contentDiv) {
+                contentDiv.classList.add('is-hidden');
+            }
+        }
+    }
+
+    // 로딩 상태 숨기기 함수
+    function hideLoading() {
+        if (loadingIndicator) {
+            loadingIndicator.classList.add('is-hidden');
+        }
+        if (contentDiv) {
+            contentDiv.classList.remove('is-hidden');
+        }
+    }
+
+    // 결과 표시 함수
+    function displayResult(response) {
+        if (!resultDiv || !contentDiv) {
+            console.error('Required DOM elements not found');
+            return;
+        }
+
+        resultDiv.classList.remove('is-hidden');
+        hideLoading();
 
       if (response?.success && response?.eventData) {
           const data = response.eventData;
@@ -105,46 +132,49 @@ document.addEventListener('DOMContentLoaded', function() {
       }
   }
 
-  // 선택된 텍스트 가져오기
-  chrome.runtime.sendMessage({action: "getSelectedText"}, function(response) {
-      if (chrome.runtime.lastError) {
-          console.error('Error getting selected text:', chrome.runtime.lastError);
-          return;
-      }
+    // 선택된 텍스트 가져오기
+    chrome.runtime.sendMessage({action: "getSelectedText"}, function(response) {
+        if (chrome.runtime.lastError) {
+            console.error('Error getting selected text:', chrome.runtime.lastError);
+            return;
+        }
 
-      const selectedTextElement = document.getElementById('selectedText');
-      if (selectedTextElement && response?.selectedText) {
-          selectedTextElement.textContent = response.selectedText;
-      }
-  });
+        const selectedTextElement = document.getElementById('selectedText');
+        if (selectedTextElement && response?.selectedText) {
+            selectedTextElement.textContent = response.selectedText;
+        }
+    });
 
-  // 폼 제출 처리
-  if (form) {
-      form.addEventListener('submit', function(e) {
-          e.preventDefault();
-          showLoading();
+    // 폼 제출 처리
+    if (form) {
+        form.addEventListener('submit', function(e) {
+            e.preventDefault();
+            showLoading();
+            
+            const selectedTextElement = document.getElementById('selectedText');
+            const selectedText = selectedTextElement?.textContent?.trim() || '텍스트 없음';
+            
+            const eventData = {
+                title: document.getElementById('title')?.value || '',
+                startDateTime: document.getElementById('startDateTime')?.value || '',
+                endDateTime: document.getElementById('endDateTime')?.value || '',
+                selectedText: selectedText
+            };
 
-          const eventData = {
-              title: document.getElementById('title')?.value || '',
-              startDateTime: document.getElementById('startDateTime')?.value || '',
-              endDateTime: document.getElementById('endDateTime')?.value || '',
-              selectedText: document.getElementById('selectedText')?.textContent || ''
-          };
+            console.log('Sending event data:', eventData);
 
-          console.log('Sending event data:', eventData);
-
-          chrome.runtime.sendMessage({
-              action: 'parseText',
-              eventData: eventData
-          }, function(response) {
-              if (chrome.runtime.lastError) {
-                  console.error('Error parsing text:', chrome.runtime.lastError);
-                  displayResult({
-                      success: false,
-                      error: '메시지 전송 실패: ' + chrome.runtime.lastError.message
-                  });
-                  return;
-              }
+            chrome.runtime.sendMessage({
+                action: 'parseText',
+                eventData: eventData
+            }, function(response) {
+                if (chrome.runtime.lastError) {
+                    console.error('Error parsing text:', chrome.runtime.lastError);
+                    displayResult({
+                        success: false,
+                        error: '메시지 전송 실패: ' + chrome.runtime.lastError.message
+                    });
+                    return;
+                }
 
               console.log('Got response:', response);
               displayResult(response);
