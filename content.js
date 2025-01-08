@@ -6,10 +6,20 @@ let overlay, selection;
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === "startSelection") {
     startAreaSelection();
+    sendResponse({ success: true }); 
   }
-  else if (request.action === "cropScreenshot") {
+  else if (request.action === "cropImage") {
+    console.log('IN CropImage');
     const img = new Image();
-    img.onload = () => {
+    img.onload = async () => {
+      if (!img.width || !img.height) {
+        console.error('No valid image loaded');
+        sendResponse({ 
+          error: 'No image available',
+          success: false
+        });
+        return;
+      }
       const canvas = document.createElement('canvas');
       const dpr = request.area.devicePixelRatio || 1;
       
@@ -29,7 +39,15 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         request.area.height
       );
       
-      sendResponse({ croppedImage: canvas.toDataURL() });
+      console.log('Starting OCR...');
+      const worker = await Tesseract.createWorker('eng+kor');
+      const { data: { text } } = await worker.recognize(canvas);
+      console.log('Raw OCR text:', text);
+      await worker.terminate();
+      
+      sendResponse({ 
+        recognizedText: text
+      });
     };
     img.src = request.imageData;
     return true;

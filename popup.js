@@ -20,31 +20,6 @@ document.addEventListener('DOMContentLoaded', function() {
             })[char])
             : '';
     }
-
-    //Screenshot Helper
-    chrome.storage.local.get(['capturedImage'], function(result) {
-        if (result.capturedImage) {
-            if (capturedImage) {
-                capturedImage.src = result.capturedImage;
-                capturedImage.style.display = 'block';
-            }
-        }
-    });
-
-    function updateCapturedImage(imageData) {
-        if (capturedImage) {
-            capturedImage.src = imageData;
-            capturedImage.style.display = 'block';
-        }
-    }
-
-    // 이미지 표시 함수
-    chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-        if (request.action === "updateCapturedImage" && request.imageData) {
-            updateCapturedImage(request.imageData);
-        }
-    });
-
     // 로딩 상태 표시 함수
     function showLoading() {
         if (resultDiv && loadingIndicator) {
